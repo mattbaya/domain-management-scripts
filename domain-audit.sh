@@ -34,7 +34,9 @@ log() {
     local level="$1"
     local message="$2"
     local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-    echo "[$timestamp] [$level] $message" | tee -a "$LOG_FILE"
+    local log_line="[$timestamp] [$level] $message"
+    echo "$log_line" >> "$LOG_FILE"
+    echo "$log_line" >&2
 }
 
 # Enhanced expiration date extraction function
@@ -202,7 +204,7 @@ load_domain_data() {
     while IFS= read -r line; do
         [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
         
-        local domain=$(echo "$line" | awk '{print $1}')
+        local domain=$(echo "$line" | awk '{print $1}' | sed 's/:$//')
         local username=$(echo "$line" | awk '{print $2}')
         
         [[ -z "$domain" || -z "$username" ]] && continue
@@ -228,14 +230,8 @@ load_domain_data() {
         fi
     done
     
-    domain_count=0
-    account_count=0
-    if [[ -v domain_accounts ]]; then
-        domain_count=${#domain_accounts[@]}
-    fi
-    if [[ -v account_domains ]]; then
-        account_count=${#account_domains[@]}
-    fi
+    domain_count=${#domain_accounts[@]}
+    account_count=${#account_domains[@]}
     log "INFO" "Loaded $domain_count domains across $account_count accounts"
 }
 
@@ -368,7 +364,7 @@ audit_domain() {
     registration_status=$(get_domain_status "$domain")
     domain_status["$domain"]="$registration_status"
     
-    log "INFO" "Domain $domain status: $registration_status"
+    log "INFO" "Domain $domain: status=$registration_status"
     
     # Handle based on status
     case "$registration_status" in
@@ -480,6 +476,110 @@ generate_report() {
     log "INFO" "Report generated: $REPORT_FILE"
 }
 
+# Generate summary report and email it
+generate_summary_report() {
+    local summary_file="$LOG_DIR/domain-audit-summary-$(date +%Y%m%d-%H%M%S).txt"
+    
+    # Count domain statuses
+    local total_domains=${#domain_status[@]}
+    local active_count=0
+    local unregistered_count=0
+    local expired_count=0
+    local failed_count=0
+    local external_count=0
+    
+    for status in "${domain_status[@]}"; do
+        case "$status" in
+            "active") ((active_count++)) ;;
+            "unregistered") ((unregistered_count++)) ;;
+            "expired") ((expired_count++)) ;;
+            "whois_failed") ((failed_count++)) ;;
+            "external") ((external_count++)) ;;
+        esac
+    done
+    
+    # Generate summary report
+    {
+        echo "Domain Audit Summary Report"
+        echo "Generated: $(date)"
+        echo "Server: $(hostname -f)"
+        echo "Mode: $([ "$DRY_RUN" == "true" ] && echo "DRY RUN" || echo "LIVE")"
+        echo "=========================================="
+        echo
+        echo "AUDIT RESULTS ($total_domains domains processed):"
+        echo "• Active domains: $active_count ($(( active_count * 100 / total_domains || 0 ))%)"
+        echo "• Unregistered domains: $unregistered_count ($(( unregistered_count * 100 / total_domains || 0 ))%)"
+        echo "• Expired domains: $expired_count ($(( expired_count * 100 / total_domains || 0 ))%)"
+        echo "• External domains: $external_count ($(( external_count * 100 / total_domains || 0 ))%)"
+        echo "• WHOIS failed: $failed_count ($(( failed_count * 100 / total_domains || 0 ))%)"
+        echo
+        
+        if [[ $active_count -gt 0 ]]; then
+            echo "ACTIVE DOMAINS:"
+            for domain in "${!domain_status[@]}"; do
+                if [[ "${domain_status[$domain]}" == "active" ]]; then
+                    echo "- $domain (user: ${domain_accounts[$domain]})"
+                fi
+            done | sort | head -10
+            [[ $active_count -gt 10 ]] && echo "... and $(( active_count - 10 )) more"
+            echo
+        fi
+        
+        if [[ $unregistered_count -gt 0 ]]; then
+            echo "UNREGISTERED DOMAINS:"
+            for domain in "${!domain_status[@]}"; do
+                if [[ "${domain_status[$domain]}" == "unregistered" ]]; then
+                    echo "- $domain (user: ${domain_accounts[$domain]})"
+                fi
+            done | sort | head -10
+            [[ $unregistered_count -gt 10 ]] && echo "... and $(( unregistered_count - 10 )) more"
+            echo
+        fi
+        
+        if [[ $expired_count -gt 0 ]]; then
+            echo "EXPIRED DOMAINS:"
+            for domain in "${!domain_status[@]}"; do
+                if [[ "${domain_status[$domain]}" == "expired" ]]; then
+                    echo "- $domain (user: ${domain_accounts[$domain]})"
+                fi
+            done | sort | head -10
+            [[ $expired_count -gt 10 ]] && echo "... and $(( expired_count - 10 )) more"
+            echo
+        fi
+        
+        echo "ACTIONS TAKEN:"
+        local action_count=0
+        if [[ -v actions_taken ]]; then
+            action_count=${#actions_taken[@]}
+        fi
+        if [[ $action_count -eq 0 ]]; then
+            echo "No actions taken."
+        else
+            for item in "${!actions_taken[@]}"; do
+                echo "- $item: ${actions_taken[$item]}"
+            done | sort
+        fi
+        echo
+        
+        echo "=========================================="
+        echo "Full detailed report: $REPORT_FILE"
+        echo "Full log file: $LOG_FILE"
+        
+    } > "$summary_file"
+    
+    log "INFO" "Summary report generated: $summary_file"
+    
+    # Email the summary report
+    if [[ -n "$NOTIFICATION_EMAIL" ]]; then
+        local subject="$MAIL_SUBJECT_PREFIX Domain Audit Complete - $total_domains domains processed"
+        if cat "$summary_file" | mail -s "$subject" "$NOTIFICATION_EMAIL"; then
+            log "INFO" "Summary report emailed to $NOTIFICATION_EMAIL"
+        else
+            log "ERROR" "Failed to email summary report to $NOTIFICATION_EMAIL"
+        fi
+    fi
+}
+
 # Main execution
 main() {
     log "INFO" "Starting domain audit (DRY_RUN: $DRY_RUN)"
@@ -503,6 +603,7 @@ main() {
     done
     
     generate_report
+    generate_summary_report
     
     log "INFO" "Domain audit completed"
     echo "Report: $REPORT_FILE"

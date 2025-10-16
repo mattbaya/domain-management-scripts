@@ -196,6 +196,41 @@ wait
 
 ## Recent Enhancements (October 2025)
 
+### Domain Audit Script Fixes (2025-10-15)
+**Issue**: Domain audit script had several critical bugs affecting functionality
+**Resolution**: Comprehensive fixes applied:
+
+#### Fixed Issues:
+- ✅ **Report Location**: Changed from `/var/log/` to `./reports/` directory as requested
+- ✅ **Domain Parsing**: Fixed trailing colons in domain names causing load failures
+- ✅ **Domain Counting**: Now correctly reports "681 domains across 258 accounts"
+- ✅ **Logging Cleanup**: Eliminated duplicate and mixed log entries in reports
+- ✅ **Summary Reporting**: Added automatic statistical summary generation and email delivery
+
+#### New Features Added:
+- **📧 Email Summaries**: Automatic summary reports sent to service@svaha.com
+- **📊 Statistical Analysis**: Domain categorization with percentage breakdowns
+- **🎯 Key Findings**: Top 10 lists for active, unregistered, and expired domains
+- **🛠️ Clean Output**: Separated log output from command substitution to prevent mixed content
+
+#### Technical Improvements:
+```bash
+# Fixed domain parsing (removed trailing colons)
+local domain=$(echo "$line" | awk '{print $1}' | sed 's/:$//')
+
+# Fixed logging function (stderr instead of stdout)
+log() {
+    local log_line="[$timestamp] [$level] $message"
+    echo "$log_line" >> "$LOG_FILE"
+    echo "$log_line" >&2  # stderr prevents capture in command substitution
+}
+
+# Added automatic summary generation
+generate_summary_report() {
+    # Statistical analysis with email delivery
+}
+```
+
 ### SpamExperts Management Suite
 A comprehensive set of tools for managing SpamExperts email filtering service:
 

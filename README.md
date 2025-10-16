@@ -98,7 +98,7 @@ A collection of bash scripts for managing domains, DNS zones, and WHOIS lookups 
 
 **Configuration**: Uses `config/dns-update.conf` by default, or specify custom config file
 
-### 6. `domain-audit.sh` ⭐ **NEW**
+### 6. `domain-audit.sh` ⭐ **ENHANCED**
 **Purpose**: Comprehensive domain audit and cleanup automation for expired, unregistered, and externally-pointed domains.
 
 **Usage**:
@@ -114,11 +114,21 @@ A collection of bash scripts for managing domains, DNS zones, and WHOIS lookups 
 - **Primary Domain Migration**: Suggests primary domain changes for accounts with alternatives
 - **Email Notifications**: Sends alerts to service@svaha.com for important actions
 - **Safety Features**: Dry-run mode, confirmation prompts, comprehensive logging
-- **Detailed Reporting**: Generates audit reports and action logs
+- **Detailed Reporting**: Generates audit reports and action logs in `./reports/` directory
+- **📧 Automatic Summary Reports**: Generates and emails statistical summaries with key findings
+- **📊 Domain Statistics**: Categorizes domains by status with percentage breakdowns
+- **🎯 Key Findings Lists**: Highlights top active, unregistered, and expired domains
 
 **Configuration**: Uses `config/audit.conf` for server settings, email, and safety options
 
 **⚠️ Important**: Always run in dry-run mode first! See `DOMAIN-AUDIT-USAGE.md` for detailed setup and usage instructions.
+
+**Recent Fixes** (2025-10-15):
+- ✅ Fixed report location (now uses `./reports/` instead of `/var/log/`)
+- ✅ Fixed domain parsing (removed trailing colons)
+- ✅ Fixed domain counting (now correctly shows 681 domains across 258 accounts)
+- ✅ Cleaned up logging (eliminated duplicate/mixed log entries)
+- ✅ Enhanced with automatic summary generation and email delivery
 
 ## SpamExperts Management (`spamexperts/`)
 
