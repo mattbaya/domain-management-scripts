@@ -1,0 +1,21 @@
+# Log files
+*.log
+/var/log/
+
+# Temporary files
+*.tmp
+temp_*
+
+# SpamExperts monitoring state
+spamexperts/last-spamexperts-state.txt
+
+# Generated reports (keep examples but ignore timestamped ones)
+*-202[0-9][0-9][0-9][0-9][0-9]-*.txt
+*-202[0-9][0-9][0-9][0-9][0-9]-*.csv
+
+# Backup files
+*.backup
+*.bak
+
+# Personal configuration (if any)
+config/personal.conf
