@@ -11,7 +11,7 @@ USERDOMAINS="/etc/userdomains"
 
 # Function to check for the domain in user domains
 find_user_for_domain() {
-    grep -m1 "^$DOMAIN:" "$USERDOMAINS" | awk -F: '{print $2}'
+    grep -m1 "^$DOMAIN:" "$USERDOMAINS" | awk -F: '{print $2}' | xargs
 }
 
 # Function to check if a DNS zone exists
@@ -23,6 +23,123 @@ check_dns_zone() {
         echo "No DNS zone found for $DOMAIN"
         return 1
     fi
+}
+
+# Function to perform WHOIS lookup and check domain status
+check_domain_registration() {
+    local domain="$1"
+    local timeout=30
+    
+    echo "Checking domain registration status..."
+    
+    # Perform WHOIS lookup with timeout
+    local whois_output
+    if ! whois_output=$(timeout "$timeout" whois "$domain" 2>/dev/null); then
+        echo "Warning: WHOIS lookup failed or timed out for $domain"
+        return 1
+    fi
+    
+    # Check if domain is registered (not expired or available)
+    if echo "$whois_output" | grep -qi -E "(no match|not found|available|no data found|no entries found|status: free)"; then
+        echo "Domain $domain appears to be unregistered or expired"
+        return 1
+    fi
+    
+    # Extract expiration date
+    local expiration_date
+    local patterns=(
+        "Registry Expiry Date:"
+        "Expiration Date:"
+        "Expires:"
+        "Valid Until:"
+        "paid-till:"
+        "Expiry Date:"
+        "expire:"
+    )
+    
+    for pattern in "${patterns[@]}"; do
+        expiration_date=$(echo "$whois_output" | grep -i "$pattern" | head -1 | awk -F: '{print $2}' | xargs)
+        [[ -n "$expiration_date" ]] && break
+    done
+    
+    if [[ -n "$expiration_date" ]]; then
+        echo "Domain expires: $expiration_date"
+    else
+        echo "Could not determine expiration date"
+    fi
+    
+    return 0
+}
+
+# Function to check DNS pointing
+check_dns_pointing() {
+    local domain="$1"
+    
+    echo "Checking where $domain is currently pointed..."
+    
+    # Check A record
+    local a_record=$(dig +short A "$domain" 2>/dev/null | head -1)
+    if [[ -n "$a_record" ]]; then
+        echo "A record points to: $a_record"
+    else
+        echo "No A record found"
+    fi
+    
+    # Check NS records
+    echo "Name servers:"
+    local ns_records=$(dig +short NS "$domain" 2>/dev/null)
+    if [[ -n "$ns_records" ]]; then
+        echo "$ns_records" | while read -r ns; do
+            echo "  $ns"
+        done
+    else
+        echo "  No NS records found"
+    fi
+    
+    # Check MX records
+    local mx_records=$(dig +short MX "$domain" 2>/dev/null)
+    if [[ -n "$mx_records" ]]; then
+        echo "MX records:"
+        echo "$mx_records" | while read -r mx; do
+            echo "  $mx"
+        done
+    fi
+}
+
+# Function to prompt for removal confirmation
+confirm_removal() {
+    local domain="$1"
+    local user="$2"
+    
+    echo ""
+    echo "=========================================="
+    echo "DOMAIN REMOVAL CONFIRMATION"
+    echo "=========================================="
+    echo "Domain: $domain"
+    echo "cPanel User: $user"
+    echo ""
+    echo "WARNING: This will:"
+    echo "  - Remove the domain from cPanel user '$user'"
+    echo "  - Delete DNS zone and backup to user's home directory"
+    echo "  - Remove domain from cluster DNS servers"
+    echo ""
+    
+    while true; do
+        read -p "Are you sure you want to remove this domain? (yes/no): " confirmation
+        case "$confirmation" in
+            yes|YES|y|Y)
+                echo "Proceeding with domain removal..."
+                return 0
+                ;;
+            no|NO|n|N)
+                echo "Domain removal cancelled by user"
+                return 1
+                ;;
+            *)
+                echo "Please answer 'yes' or 'no'"
+                ;;
+        esac
+    done
 }
 
 # Function to backup DNS zone before deletion
@@ -68,7 +185,7 @@ delete_dns_zone() {
 is_primary_domain() {
     local user="$1"
     local domain="$2"
-    local primary_domain=$(uapi --user="$user" DomainInfo main_domain | grep -E "data:|result:" | awk -F': ' '{print $2}' | tr -d '"' | head -1)
+    local primary_domain=$(uapi --user="$user" DomainInfo primary_domain 2>/dev/null | grep 'primary_domain:' | awk -F': ' '{print $2}' | xargs)
     [ "$domain" = "$primary_domain" ]
 }
 
@@ -77,15 +194,13 @@ get_active_domains() {
     local user="$1"
     local domains=()
     
-    # Get addon domains
-    local addon_domains=$(uapi --user="$user" DomainInfo list_addon_domains 2>/dev/null | grep -E "domain:" | awk -F': ' '{print $2}' | tr -d '"')
+    # Get all domains and filter out primary and current domain
+    local all_domains=$(uapi --user="$user" DomainInfo list_domains 2>/dev/null | grep 'domain:' | awk -F': ' '{print $2}' | xargs)
+    local primary=$(uapi --user="$user" DomainInfo primary_domain 2>/dev/null | grep 'primary_domain:' | awk -F': ' '{print $2}' | xargs)
     
-    # Get parked domains  
-    local parked_domains=$(uapi --user="$user" DomainInfo list_parked_domains 2>/dev/null | grep -E "domain:" | awk -F': ' '{print $2}' | tr -d '"')
-    
-    # Combine all domains except the one being removed
-    for domain in $addon_domains $parked_domains; do
-        if [ "$domain" != "$DOMAIN" ] && [ -n "$domain" ]; then
+    # Combine all domains except primary and the one being removed
+    for domain in $all_domains; do
+        if [ "$domain" != "$DOMAIN" ] && [ "$domain" != "$primary" ] && [ -n "$domain" ]; then
             domains+=("$domain")
         fi
     done
@@ -131,8 +246,8 @@ change_primary_domain() {
     
     echo "Changing primary domain for user $user to $new_primary..."
     
-    # First convert the new primary from addon to main domain
-    if uapi --user="$user" DomainInfo main_domain_builtin domain="$new_primary" 2>/dev/null; then
+    # Use WHM API to change primary domain
+    if whmapi1 domainuserdata domain="$new_primary" action=park 2>/dev/null >/dev/null; then
         echo "Successfully changed primary domain to $new_primary"
         return 0
     else
@@ -154,14 +269,37 @@ remove_orphaned_domain() {
 }
 
 # Main execution
+echo "Starting domain removal process for: $DOMAIN"
+echo "================================================"
+
+# First, check if domain is registered and where it points
+if check_domain_registration "$DOMAIN"; then
+    echo ""
+    check_dns_pointing "$DOMAIN"
+    echo ""
+fi
+
 USER=$(find_user_for_domain)
 
 if [ -z "$USER" ]; then
-    echo "Domain $DOMAIN is not associated with any cPanel user. Checking further..."
+    echo "Domain $DOMAIN is not associated with any cPanel user."
+    
+    # Still prompt for confirmation even for orphaned domains
+    if ! confirm_removal "$DOMAIN" "none (orphaned)"; then
+        exit 0
+    fi
+    
+    echo "Checking further..."
     remove_orphaned_domain
     delete_dns_zone
 else
-    echo "Domain $DOMAIN found under user $USER. Attempting to remove..."
+    echo "Domain $DOMAIN found under user $USER."
+    
+    # Prompt for confirmation before proceeding
+    if ! confirm_removal "$DOMAIN" "$USER"; then
+        exit 0
+    fi
+    
     USER_HOME="/home/$USER"
     
     # Check if this is the primary domain
@@ -194,17 +332,11 @@ else
         fi
     fi
     
-    # Remove domain (addon or parked)
-    if uapi --user="$USER" DomainInfo remove_addon_domain domain="$DOMAIN" 2>/dev/null; then
-        echo "Successfully removed addon domain"
+    # Remove domain using WHM API
+    if whmapi1 delete_domain domain="$DOMAIN" 2>/dev/null | grep -q 'status: 1'; then
+        echo "Successfully removed domain from cPanel"
     else
-        echo "Addon domain removal failed or domain was not an addon"
-    fi
-    
-    if uapi --user="$USER" DomainInfo remove_parked_domain domain="$DOMAIN" 2>/dev/null; then
-        echo "Successfully removed parked domain"
-    else
-        echo "Parked domain removal failed or domain was not parked"
+        echo "Domain removal completed (may not have been in cPanel system)"
     fi
     
     delete_dns_zone "$USER_HOME"
