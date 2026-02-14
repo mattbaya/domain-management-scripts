@@ -114,6 +114,7 @@ A collection of bash scripts for managing domains, DNS zones, and WHOIS lookups 
 - **Primary Domain Migration**: Suggests primary domain changes for accounts with alternatives
 - **Email Notifications**: Sends alerts to service@svaha.com for important actions
 - **Safety Features**: Dry-run mode, confirmation prompts, comprehensive logging
+- **Reliable Cache Generation**: Periodically saves `domain-status-cache-YYYYMMDD.txt` during runs and on exit (trap)
 - **Detailed Reporting**: Generates audit reports and action logs in `./reports/` directory
 - **📧 Automatic Summary Reports**: Generates and emails statistical summaries with key findings
 - **📊 Domain Statistics**: Categorizes domains by status with percentage breakdowns
@@ -123,7 +124,14 @@ A collection of bash scripts for managing domains, DNS zones, and WHOIS lookups 
 
 **⚠️ Important**: Always run in dry-run mode first! See `DOMAIN-AUDIT-USAGE.md` for detailed setup and usage instructions.
 
-**Recent Fixes** (2025-10-15):
+**Recent Fixes** (2026-02-14):
+- ✅ Fixed early-exit bug under `set -e` caused by bash arithmetic post-increment (`((var++))`)
+- ✅ Improved daily cron reliability by periodically saving cache during runs (`CACHE_SAVE_INTERVAL`, default 25)
+- ✅ Best-effort cache save on exit (trap), so partial data still produces a report
+- ✅ Skip invalid `*` entry from `/etc/userdomains` (prevents bogus WHOIS on `*`)
+- ✅ Added `DOMAIN_AUDIT_MAX_DOMAINS` env var for safe/fast testing runs
+
+**Previous Fixes** (2025-10-15):
 - ✅ Fixed report location (now uses `./reports/` instead of `/var/log/`)
 - ✅ Fixed domain parsing (removed trailing colons)
 - ✅ Fixed domain counting (now correctly shows 681 domains across 258 accounts)
@@ -211,6 +219,8 @@ Several scripts support configuration via environment variables:
 - `WHOIS_TIMEOUT`: Timeout for WHOIS queries (default: 30 seconds)
 - `DELAY_SECONDS`: Rate limiting delay (default: 2 seconds)
 - `RATE_LIMIT_DELAY`: Alternative rate limiting variable (default: 2 seconds)
+- `CACHE_SAVE_INTERVAL`: `domain-audit.sh` cache save cadence in domains (default: 25, `0` disables)
+- `DOMAIN_AUDIT_MAX_DOMAINS`: `domain-audit.sh` stop-after limit for testing (default: 0, disabled)
 
 ## Prerequisites
 

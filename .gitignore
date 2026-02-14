@@ -13,6 +13,9 @@ spamexperts/last-spamexperts-state.txt
 *-202[0-9][0-9][0-9][0-9][0-9]-*.txt
 *-202[0-9][0-9][0-9][0-9][0-9]-*.csv
 
+# Domain status cache files
+reports/domain-status-cache-*.txt
+
 # Backup files
 *.backup
 *.bak
