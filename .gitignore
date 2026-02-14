@@ -16,6 +16,9 @@ spamexperts/last-spamexperts-state.txt
 # Domain status cache files
 reports/domain-status-cache-*.txt
 
+# All generated report artifacts
+reports/*
+
 # Backup files
 *.backup
 *.bak
